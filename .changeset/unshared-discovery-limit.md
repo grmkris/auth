@@ -2,4 +2,4 @@
 "@yielded/auth": patch
 ---
 
-Remove the shared OAuth client metadata discovery limit, which requests that never finish could exhaust.
+Recover OAuth metadata and JWKS discovery capacity after abandoned requests while retaining the eight-slot limit.
