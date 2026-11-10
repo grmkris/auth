@@ -1,5 +1,5 @@
 /** Direct PostgreSQL and SQLite owners for upstream OAuth. Factories capture
- * dependencies at construction and validate physical storage on first use.
+ * dependencies at construction and validate physical storage on use until it succeeds.
  * Provider exchange stays outside these transactions. */
 import { CurrentCommitJournal, hasCommitScope, type LifecycleHooks } from "@yielded/auth/Hooks";
 import {
@@ -131,24 +131,32 @@ const makeLazyServices = Effect.fnUntraced(function* <M, A>(
 
   const executor = yield* makeSqlCommitExecutor(() => OAuthUnavailable.make({}));
 
-  // Cache only validation and service construction; operations acquire their own connection.
-  const initialize = yield* Effect.cached(
-    validateSqlStorage(mapping).pipe(
-      Effect.catchCause((cause) =>
-        Effect.failCause(Cause.map(cause, () => OAuthUnavailable.make({}))),
-      ),
-      Effect.andThen(make(tables, mapping)),
-      withStorageValidation,
-      Effect.updateContext((current: Context.Context<never>) =>
-        Context.merge(
-          current.pipe(Context.omit(CurrentSqlCommit, CurrentCommitJournal, SqlNativeCommit)),
-          captured,
+  // Keep only completed validation and service construction; operations acquire their
+  // own connection. Until one succeeds, each caller sets up for itself rather than
+  // joining another's, whose I/O a host such as Cloudflare Workers drops without
+  // interruption when its request ends.
+  let settled: A | undefined;
+
+  const initialize = Effect.suspend(() =>
+    settled !== undefined
+      ? Effect.succeed(settled)
+      : validateSqlStorage(mapping).pipe(
+          Effect.catchCause((cause) =>
+            Effect.failCause(Cause.map(cause, () => OAuthUnavailable.make({}))),
+          ),
+          Effect.andThen(make(tables, mapping)),
+          withStorageValidation,
+          Effect.updateContext((current: Context.Context<never>) =>
+            Context.merge(
+              current.pipe(Context.omit(CurrentSqlCommit, CurrentCommitJournal, SqlNativeCommit)),
+              captured,
+            ),
+          ),
+          Effect.map((services) => (settled ??= services)),
         ),
-      ),
-    ),
   );
 
-  // Check ownership before accessing the cache so rejected callers cannot initialize it.
+  // Check ownership before setup so rejected callers cannot initialize it.
   return yield* Effect.succeed(executor.read(initialize));
 });
 

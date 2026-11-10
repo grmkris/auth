@@ -361,7 +361,7 @@ keys can coexist with text subject references; use the same lowercase UUID spell
 throughout. Logical column types describe driver values, not migration DDL.
 Permit database catalog reads: explicit session factories validate required keys and
 column compatibility at acquisition; composed storage and direct OAuth factories
-validate on their first operation.
+validate on each operation until validation succeeds.
 Schema declarations do not install constraints. Apply migrations before use and
 reacquire persistence Layers after schema changes.
 
